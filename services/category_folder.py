@@ -1,8 +1,9 @@
+# services/category_folder.py
+
 import os
 
 def setup_category(category):
-    base = os.path.join("downloads", category)
-
+    base = os.path.join("downloads", category.lower())
     pdf_dir = os.path.join(base, "pdfs")
     excel_dir = os.path.join(base, "excel")
 
