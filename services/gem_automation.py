@@ -1,21 +1,31 @@
 # services/gem_automation.py
+# =====================================================
+# FINAL STABLE GEM PDF AUTOMATION
+# - Direct browser download (GeM behaviour)
+# - Manual captcha (mandatory)
+# - Playwright expect_download (fixed)
+# - Duplicate skip
+# - Streamlit-safe (run via subprocess)
+# =====================================================
 
 import os
 import sys
 import time
-import requests
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError
 
 GEM_URL = "https://gem.gov.in/view_contracts"
 
 
 def run_gem_automation(category: str):
-    base_dir = os.getcwd()
-    pdf_dir = os.path.join(base_dir, "downloads", category.lower(), "pdfs")
+    # -------------------------------------------------
+    # BASE DIR (SAFE FOR STREAMLIT SUBPROCESS)
+    # -------------------------------------------------
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pdf_dir = os.path.join(BASE_DIR, "downloads", category.lower(), "pdfs")
     os.makedirs(pdf_dir, exist_ok=True)
 
     print("=" * 60)
-    print("GEM AUTOMATION STARTED (NETWORK BASED)")
+    print("🚀 GEM AUTOMATION STARTED (DIRECT DOWNLOAD MODE)")
     print("Category :", category)
     print("Save Dir :", pdf_dir)
     print("=" * 60)
@@ -25,24 +35,40 @@ def run_gem_automation(category: str):
     print("2. Fill captcha → SEARCH")
     print("3. Open first contract")
     print("4. Fill captcha → SUBMIT")
-    print("⬇️ After this automation will download PDFs\n")
+    print("⬇️ After this, automation will DOWNLOAD PDFs\n")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
+        context = browser.new_context(accept_downloads=True)
         page = context.new_page()
 
-        # Open GeM
         page.goto(GEM_URL, timeout=60000)
 
-        print("⏳ Waiting for user to reach CONTRACT PAGE...")
         input("👉 Contract page open ho jaye to ENTER dabao...")
 
         while True:
             try:
-                # 🔹 Contract number (page se)
-                contract_no = page.locator("text=Contract No").first.text_content()
-                contract_no = contract_no.split(":")[-1].strip()
+                # -----------------------------------------
+                # READ CONTRACT NUMBER (SAFE)
+                # -----------------------------------------
+                body_text = page.inner_text("body")
+
+                if "Contract No" not in body_text:
+                    print("⚠️ Contract page properly open nahi hai.")
+                    input("Contract open karo, phir ENTER dabao...")
+                    continue
+
+                contract_no = (
+                    body_text.split("Contract No")[1]
+                    .split("\n")[0]
+                    .replace(":", "")
+                    .strip()
+                )
+
+                if not contract_no:
+                    print("⚠️ Contract number empty.")
+                    input("ENTER dabao retry ke liye...")
+                    continue
 
                 pdf_name = f"{category}_{contract_no}.pdf"
                 pdf_path = os.path.join(pdf_dir, pdf_name)
@@ -52,60 +78,55 @@ def run_gem_automation(category: str):
                 else:
                     print(f"⬇️ Downloading: {pdf_name}")
 
-                    # 🔹 Browser cookies → requests session
-                    cookies = context.cookies()
-                    session = requests.Session()
+                    # -----------------------------------------
+                    # STRONG DOWNLOAD BUTTON CLICK
+                    # -----------------------------------------
+                    download_btn = page.locator("button:has-text('Download')")
 
-                    for c in cookies:
-                        session.cookies.set(c["name"], c["value"])
+                    if download_btn.count() == 0:
+                        print("❌ Download button not found.")
+                        print("➡️ Captcha submit karo, phir try karo.")
+                        input("ENTER dabao retry ke liye...")
+                        continue
 
-                    # 🔥 REAL DOWNLOAD REQUEST (GeM backend)
-                    download_url = "https://gem.gov.in/view_contracts/download"
+                    with page.expect_download(timeout=120000) as download_info:
+                        download_btn.click(force=True)
 
-                    payload = {
-                        "contract_no": contract_no
-                    }
+                    download = download_info.value
+                    download.save_as(pdf_path)
 
-                    headers = {
-                        "User-Agent": "Mozilla/5.0",
-                        "Referer": page.url
-                    }
+                    print(f"✅ PDF saved successfully: {pdf_name}")
 
-                    response = session.post(
-                        download_url,
-                        headers=headers,
-                        data=payload,
-                        timeout=60
-                    )
-
-                    if response.status_code == 200 and response.content[:4] == b"%PDF":
-                        with open(pdf_path, "wb") as f:
-                            f.write(response.content)
-                        print(f"✅ Saved: {pdf_name}")
-                    else:
-                        print("❌ PDF download failed (captcha/session issue)")
-                        print("➡️ Re-submit captcha and try again")
-
-                # 🔁 Go back to list
+                # -----------------------------------------
+                # BACK TO LIST
+                # -----------------------------------------
                 page.go_back()
                 time.sleep(2)
 
                 print("\n👉 Next contract open karo (manual captcha)")
-                input("ENTER dabao jab next contract ready ho...")
+                user = input("ENTER dabao | q likho quit ke liye: ").lower()
+                if user == "q":
+                    break
 
+            except TimeoutError:
+                print("⏳ Download timeout.")
+                input("Captcha / page check karo, phir ENTER dabao...")
             except KeyboardInterrupt:
                 print("\n🛑 Automation stopped by user")
                 break
             except Exception as e:
                 print("⚠️ Error:", e)
-                break
+                input("ENTER dabao retry ke liye...")
 
         browser.close()
 
 
+# =====================================================
+# RUN AS STANDALONE PROCESS (REQUIRED)
+# =====================================================
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python gem_automation.py <Category>")
+        print("Usage: python -m services.gem_automation <Category>")
         sys.exit(1)
 
     run_gem_automation(sys.argv[1])

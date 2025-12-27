@@ -1,14 +1,15 @@
 import streamlit as st
 import os
+import subprocess
+import sys
 
 from services.category_folder import setup_category
 from services.file_store import load_saved_excel, save_excel_file
-from services.custom_pdf_extractor import extract_pdf_to_text
-from services.gem_automation import run_gem_automation
+from services.custom_pdf_extractor import extract_pdf_structured_data
 
 
 # =========================================================
-# MASTER CATEGORY – FINAL STABLE VERSION
+# MASTER CATEGORY – FINAL CLIENT-READY VERSION
 # =========================================================
 def app(search=None, start_date=None, end_date=None, quarter=None):
 
@@ -61,24 +62,27 @@ def app(search=None, start_date=None, end_date=None, quarter=None):
 
         col1, col2, col3 = st.columns(3)
 
-        # ▶ START AUTOMATION (NO THREAD)
+        # ▶ START
         with col1:
             if st.button("▶ Start GeM Download"):
-
                 os.makedirs(base_dir, exist_ok=True)
 
                 if os.path.exists(stop_file):
                     os.remove(stop_file)
 
-                st.warning("Automation running. Do not refresh the page.")
+                st.warning("Automation running. Do not refresh.")
 
-                # IMPORTANT: Playwright must run in main thread
-                run_gem_automation(
-                    st.session_state.selected_category,
-                    stop_file
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "services.gem_automation",
+                        st.session_state.selected_category
+                    ],
+                    cwd=os.getcwd()
                 )
 
-        # ⏹ STOP AUTOMATION
+        # ⏹ STOP
         with col2:
             if st.button("⏹ Stop Download"):
                 os.makedirs(base_dir, exist_ok=True)
@@ -89,8 +93,8 @@ def app(search=None, start_date=None, end_date=None, quarter=None):
         # ℹ INFO
         with col3:
             st.info("Semi-automation mode")
-            st.caption("Manual captcha")
-            st.caption("Inline PDF capture")
+            st.caption("Manual captcha required")
+            st.caption("Unlimited PDFs")
             st.caption("Client safe")
 
     else:
@@ -119,14 +123,49 @@ def app(search=None, start_date=None, end_date=None, quarter=None):
             st.subheader("Last Saved Excel")
             st.dataframe(saved_df.head(200), width="stretch")
 
-    # ---------------- TAB 2: MANUAL PDF ----------------
+    # ---------------- TAB 2: MANUAL PDF EXTRACT (FINAL) ----------------
     with tab2:
-        pdf_file = st.file_uploader("Upload PDF", type=["pdf"])
-        if pdf_file:
-            extracted_text = extract_pdf_to_text(pdf_file)
-            if extracted_text:
-                st.text_area(
-                    "Extracted Clean Text",
-                    extracted_text,
-                    height=300
+        st.subheader("📄 Manual PDF Extract (Final Output)")
+
+        uploaded_pdfs = st.file_uploader(
+            "Upload one or more GeM Contract PDFs",
+            type=["pdf"],
+            accept_multiple_files=True
+        )
+
+        if uploaded_pdfs:
+            import pandas as pd
+            from io import BytesIO
+
+            structured_rows = []
+
+            for idx, pdf_file in enumerate(uploaded_pdfs, start=1):
+                st.markdown(f"### 📘 {idx}. {pdf_file.name}")
+
+                # 🔥 ONE-LINE FINAL EXTRACTION
+                data = extract_pdf_structured_data(pdf_file)
+
+                if not any(data.values()):
+                    st.warning("❌ No valid data extracted from this PDF")
+                    continue
+
+                data["PDF Name"] = pdf_file.name
+                structured_rows.append(data)
+
+            # ---------------- PREVIEW + EXCEL ----------------
+            if structured_rows:
+                df = pd.DataFrame(structured_rows)
+
+                st.subheader("📊 Extracted Contract Data")
+                st.dataframe(df, width="stretch")
+
+                buffer = BytesIO()
+                df.to_excel(buffer, index=False)
+                buffer.seek(0)
+
+                st.download_button(
+                    label="⬇️ Download Final Structured Excel",
+                    data=buffer,
+                    file_name="GEM_Final_Structured_Report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
