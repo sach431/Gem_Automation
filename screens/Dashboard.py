@@ -6,6 +6,10 @@ import plotly.express as px
 from services.file_store import load_saved_excel
 from services.date_filter import apply_date_filter
 
+# ================== CONFIG ==================
+TOP_N = 5
+# ============================================
+
 # ----------------- GLOBAL CSS -----------------
 st.markdown("""
 <style>
@@ -13,8 +17,22 @@ h1, h2, h3, h4, h5, h6 {
     text-transform: uppercase !important;
     font-weight:700 !important;
 }
-.block-container { font-size: 15px !important; }
-section[data-testid="stSidebar"] { font-size: 15px !important; }
+
+.block-container { 
+    font-size: 15px !important; 
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+div[data-testid="stDataFrame"] thead tr th {
+    background-color: #1f2937 !important;
+    color: #ffffff !important;
+    font-size: 13px !important;
+}
+div[data-testid="stDataFrame"] tbody tr td {
+    font-size: 13px !important;
+    padding: 6px 10px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -29,10 +47,10 @@ def sanitize_strings(df):
 def detect_date_column(df):
     patterns = ["date", "orderdate", "order_date", "created", "timestamp"]
     for c in df.columns:
-        if any(p in c.lower().replace(" ", "") for p in patterns):
+        name = c.lower().replace(" ", "")
+        if any(p in name for p in patterns):
             df[c] = pd.to_datetime(df[c], errors="coerce")
             if df[c].dropna().any():
-                df["Year"] = df[c].dt.year
                 return c
     return None
 
@@ -46,32 +64,33 @@ def detect_columns(df):
         numeric_cols[0] if numeric_cols else None
     )
 
-    seller_col = next(
-        (c for c in text_cols if any(k in c.lower() for k in ["seller", "buyer", "company", "name"])),
+    org_col = next(
+        (c for c in text_cols if any(k in c.lower() for k in [
+            "organisation", "organization", "seller", "buyer", "company", "name"
+        ])),
         None
     )
 
     city_col = next(
-        (c for c in text_cols if any(k in c.lower() for k in ["city", "state", "district"])),
+        (c for c in text_cols if "city" in c.lower()),
         None
     )
 
-    return value_col, seller_col, city_col
+    return value_col, org_col, city_col
 
 
 def apply_search_filter(df, search):
     if not search:
         return df
     s = search.lower()
-    return df[df.apply(lambda r: s in r.astype(str).str.lower().to_string(), axis=1)]
-
+    return df[df.apply(lambda r: s in " ".join(r.astype(str)).lower(), axis=1)]
 
 # ----------------- MAIN APP -----------------
 def app(search=None, start_date=None, end_date=None, mode=None):
 
     st.header("📊 KPI Dashboard")
 
-    # ---------------- LOAD DATA ----------------
+    # -------- LOAD DATA --------
     df = load_saved_excel()
     if df is None or df.empty:
         st.warning("⚠ Upload an Excel in Master Category first.")
@@ -80,84 +99,99 @@ def app(search=None, start_date=None, end_date=None, mode=None):
     df = sanitize_strings(df.copy())
     df.columns = df.columns.str.strip()
 
-    # ---------------- DATE COLUMN ----------------
+    # -------- DATE FILTER --------
     date_col = detect_date_column(df)
-
-    # ---------------- APPLY DATE FILTER ----------------
     if date_col and start_date is not None and mode is not None:
-
-        filtered, label, d1, d2 = apply_date_filter(
+        df, label, d1, d2 = apply_date_filter(
             df,
             date_col=date_col,
             from_date=start_date,
             to_date=end_date,
             mode=mode
         )
-
         if label:
             st.caption(
                 f"📌 Period Applied: **{label}** "
                 f"({d1.strftime('%Y-%m-%d')} → {d2.strftime('%Y-%m-%d')})"
             )
-    else:
-        # ✅ From blank → FULL DATA
-        filtered = df.copy()
 
-    # ---------------- SEARCH ----------------
-    filtered = apply_search_filter(filtered, search)
-
-    if filtered.empty:
+    # -------- SEARCH --------
+    df = apply_search_filter(df, search)
+    if df.empty:
         st.info("ℹ️ No data available.")
         return
 
-    # ---------------- KPI ----------------
-    value_col, seller_col, city_col = detect_columns(filtered)
+    # -------- COLUMN DETECTION --------
+    value_col, org_col, city_col = detect_columns(df)
 
     if value_col:
-        filtered[value_col] = pd.to_numeric(filtered[value_col], errors="coerce")
+        df[value_col] = pd.to_numeric(df[value_col], errors="coerce").fillna(0)
 
-    total_records = len(filtered)
-    total_value = filtered[value_col].sum() if value_col else 0
-    avg_value = filtered[value_col].mean() if value_col else 0
+    # -------- KPI --------
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Records", len(df))
+    c2.metric("Total Value", f"{df[value_col].sum():,.0f}" if value_col else "N/A")
+    c3.metric("Average Value", f"{df[value_col].mean():,.2f}" if value_col else "N/A")
 
-    top_seller = "N/A"
-    if seller_col:
-        m = filtered[seller_col].dropna().mode()
-        if not m.empty:
-            top_seller = m.iloc[0]
+    st.markdown("<hr style='margin:12px 0;'>", unsafe_allow_html=True)
 
-    st.subheader("📈 Key Metrics")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Records", total_records)
-    c2.metric("Total Value", f"{total_value:,.0f}")
-    c3.metric("Average Value", f"{avg_value:,.2f}")
-    c4.metric("Top Seller", top_seller)
+    # -------- TOP 5 TABLES --------
+    col1, col2 = st.columns(2)
 
-    st.divider()
+    # --- Top Organizations ---
+    with col1:
+        st.subheader("🏥 Top 5 Organizations")
 
-    # ---------------- TABLES ----------------
-    left, right = st.columns(2)
-
-    with left:
-        st.write("### Top Sellers")
-        if seller_col and value_col:
-            ts = (
-                filtered.groupby(seller_col)[value_col]
+        if org_col and value_col:
+            top_org = (
+                df.groupby(org_col, as_index=False)[value_col]
                 .sum()
-                .sort_values(ascending=False)
-                .head(8)
+                .sort_values(value_col, ascending=False)
+                .head(TOP_N)
+            )
+            top_org.insert(0, "Rank", range(1, len(top_org) + 1))
+
+            st.dataframe(
+                top_org,
+                hide_index=True,
+                use_container_width=True,
+                height=220
+            )
+        else:
+            st.info("ℹ️ Organization / Value column not found")
+
+    # --- Top Cities ---
+    with col2:
+        st.subheader("🏙️ Top 5 Cities")
+
+        if city_col:
+            top_city = (
+                df[city_col]
+                .value_counts()
+                .head(TOP_N)
                 .reset_index()
             )
-            st.dataframe(ts, use_container_width=True)
+            top_city.columns = ["City", "Count"]
+            top_city.insert(0, "Rank", range(1, len(top_city) + 1))
 
-    with right:
-        st.write("### Top Cities")
-        if city_col:
-            tc = filtered[city_col].value_counts().head(8).reset_index()
-            tc.columns = ["City", "Count"]
-            st.dataframe(tc, use_container_width=True)
+            st.dataframe(
+                top_city,
+                hide_index=True,
+                use_container_width=True,
+                height=220
+            )
+        else:
+            st.info("ℹ️ City column not found")
 
-    st.divider()
-
+    # -------- DATA PREVIEW --------
     st.subheader("📄 Data Preview")
-    st.dataframe(filtered.head(200), use_container_width=True)
+
+    preview_df = df.head(100).reset_index(drop=True)
+    preview_df.insert(0, "S.No", range(1, len(preview_df) + 1))
+
+    st.dataframe(
+        preview_df,
+        hide_index=True,
+        use_container_width=True,
+        height=320
+    )

@@ -63,7 +63,6 @@ def app(search=None, start_date=None, end_date=None, mode=None):
 
     # ---------------- APPLY DATE FILTER ----------------
     if date_col and start_date is not None and mode is not None:
-
         filtered, label, d1, d2 = apply_date_filter(
             df,
             date_col=date_col,
@@ -78,7 +77,6 @@ def app(search=None, start_date=None, end_date=None, mode=None):
                 f"({d1.strftime('%Y-%m-%d')} → {d2.strftime('%Y-%m-%d')})"
             )
     else:
-        # ✅ From blank → FULL DATA
         filtered = df.copy()
 
     # ---------------- GLOBAL SEARCH ----------------
@@ -141,13 +139,18 @@ def app(search=None, start_date=None, end_date=None, mode=None):
 
     if name_search.strip():
         filtered = filtered[
-            filtered[name_col].astype(str)
+            filtered[name_col]
+            .astype(str)
             .str.contains(name_search, case=False, na=False)
         ]
 
     if filtered.empty:
         st.info("ℹ️ No data after applying filters.")
         return
+
+    # ---------------- ADD S.No (FINAL FIX) ----------------
+    filtered = filtered.reset_index(drop=True)
+    filtered.insert(0, "S.No", range(1, len(filtered) + 1))
 
     # ---------------- RESULTS ----------------
     with right:
@@ -158,7 +161,13 @@ def app(search=None, start_date=None, end_date=None, mode=None):
         c2.metric("Total Value", f"{filtered[value_col].sum():,.0f}")
 
         st.markdown("---")
-        st.dataframe(filtered, use_container_width=True)
+
+        st.dataframe(
+            filtered,
+            hide_index=True,          # ❌ 0/1/2 index gone
+            use_container_width=True,
+            height=420
+        )
 
         st.download_button(
             "⬇️ Download Excel",

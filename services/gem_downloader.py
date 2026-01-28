@@ -1,110 +1,117 @@
+# services/gem_downloader.py
+# =====================================================
+# FINAL GEM DOWNLOADER (NO __init__.py REQUIRED)
+#
+# ✔ Manual CAPTCHA
+# ✔ Browser handles download
+# ✔ System Downloads watcher
+# ✔ Rename + move after detect
+# =====================================================
+
 import os
+import sys
 import time
 from playwright.sync_api import sync_playwright
 
+# =====================================================
+# PATH FIX (REQUIRED WHEN NO __init__.py)
+# =====================================================
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# =====================================================
+# RELATIVE IMPORTS (FINAL FIX)
+# =====================================================
+from .download_watcher import wait_for_pdf_download
+from .file_store import move_and_rename_pdf
+
+# =====================================================
 GEM_URL = "https://gem.gov.in/view_contracts"
 
 
 def run_gem_downloader(category="default"):
-    """
-    FINAL GEM MULTIPLE PDF DOWNLOADER (SIMPLE VERSION)
-    -------------------------------------------------
-    ✔ Manual captcha
-    ✔ Multiple contract PDFs
-    ✔ Popup safe
-    ✔ Resume / skip duplicate PDFs
-    """
+    print("=" * 60)
+    print("🚀 GEM DOWNLOADER STARTED (FINAL)")
+    print("Category:", category)
+    print("=" * 60)
 
-    # ---------- PDF FOLDER ----------
-    pdf_dir = os.path.join(
-        os.getcwd(), "downloads", category.lower(), "pdfs"
-    )
-    os.makedirs(pdf_dir, exist_ok=True)
-
-    downloaded = {
-        f.lower() for f in os.listdir(pdf_dir)
-        if f.lower().endswith(".pdf")
-    }
-
-    print("\n======================================")
-    print("🚀 GEM PDF DOWNLOADER STARTED")
-    print(f"📂 Category   : {category}")
-    print(f"📂 Save path  : {pdf_dir}")
-    print("======================================\n")
+    print("\n🛑 MANUAL STEPS (MANDATORY)")
+    print("1. Select category")
+    print("2. Select date / quarter")
+    print("3. Solve CAPTCHA → SEARCH")
+    print("4. Open contract → Solve CAPTCHA → SUBMIT")
+    print("⬇️ Download auto-detect hoga\n")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=False,
-            args=["--start-maximized"]
-        )
-
-        context = browser.new_context(accept_downloads=True)
+        browser = p.chromium.launch(headless=False)
+        context = browser.new_context()
         page = context.new_page()
 
-        # 1️⃣ Open GeM
-        page.goto(GEM_URL)
+        page.goto(GEM_URL, timeout=60000)
+        input("👉 Contract page open ho jaye to ENTER dabao...")
 
-        print("🛑 MANUAL STEPS (DO THIS NOW)")
-        print("1. Select Category")
-        print("2. Select Date / Quarter")
-        print("3. Fill Captcha")
-        print("4. Click SEARCH\n")
-
-        # 2️⃣ Wait for contract table
-        page.wait_for_selector("table tbody tr", timeout=0)
-        print("✅ Contract list loaded\n")
-
-        # 3️⃣ Loop contracts
         while True:
-            rows = page.locator("table tbody tr")
-            total = rows.count()
+            try:
+                body_text = page.inner_text("body")
 
-            if total == 0:
-                print("🎉 All contracts processed")
+                if "Contract No" not in body_text:
+                    input("⚠️ Contract open nahi hai. ENTER dabao...")
+                    continue
+
+                contract_no = (
+                    body_text.split("Contract No")[1]
+                    .split("\n")[0]
+                    .replace(":", "")
+                    .strip()
+                )
+
+                print(f"\n📄 Contract: {contract_no}")
+
+                download_btn = page.locator("button:has-text('Download')")
+                if download_btn.count() == 0:
+                    input("❌ Download button nahi mila. CAPTCHA submit karke ENTER dabao...")
+                    continue
+
+                # CLICK ONLY
+                download_btn.first.click(force=True)
+                print("⬇️ Download clicked")
+
+                # WATCH SYSTEM DOWNLOADS
+                downloaded_pdf = wait_for_pdf_download()
+
+                if downloaded_pdf:
+                    final_path = move_and_rename_pdf(
+                        src_pdf_path=downloaded_pdf,
+                        category=category,
+                        contract_no=contract_no
+                    )
+                    print(f"✅ Saved → {final_path}")
+                else:
+                    print("❌ Download detect nahi hua")
+
+                page.go_back()
+                time.sleep(2)
+
+                user = input("ENTER = next | q = quit : ").lower()
+                if user == "q":
+                    break
+
+            except KeyboardInterrupt:
+                print("\n🛑 User stopped")
                 break
-
-            print(f"➡️ Remaining contracts: {total}")
-
-            row = rows.first
-            link = row.locator("a").first
-
-            if link.count() == 0:
-                print("⚠️ No contract link found")
-                break
-
-            # -------- POPUP SAFE CLICK --------
-            with page.expect_popup() as pop:
-                link.click()
-
-            popup = pop.value
-            popup.wait_for_load_state()
-
-            print("🛑 Popup opened → captcha bharo & submit")
-
-            # Wait until Download appears
-            popup.wait_for_selector("text=Download", timeout=0)
-
-            # -------- DOWNLOAD --------
-            with popup.expect_download(timeout=0) as d:
-                popup.click("text=Download")
-
-            download = d.value
-            filename = download.suggested_filename.lower()
-            save_path = os.path.join(pdf_dir, filename)
-
-            if os.path.exists(save_path):
-                print(f"⏭️ Already exists, skipped: {filename}")
-            else:
-                download.save_as(save_path)
-                print(f"✅ Downloaded: {filename}")
-
-            popup.close()
-            time.sleep(1.5)
+            except Exception as e:
+                print("⚠️ Error:", e)
+                input("ENTER dabao retry ke liye...")
 
         browser.close()
-        print("\n✅ GEM DOWNLOAD FINISHED")
+        print("\n✅ GEM DOWNLOADER COMPLETED")
 
 
-# -------- DIRECT RUN --------
+# =====================================================
+# DIRECT RUN (OPTIONAL)
+# =====================================================
 if __name__ == "__main__":
-    run_gem_downloader("default")
+    cat = sys.argv[1] if len(sys.argv) > 1 else "default"
+    run_gem_downloader(cat)

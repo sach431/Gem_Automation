@@ -1,66 +1,60 @@
 # services/file_store.py
+# =====================================================
+# CENTRAL FILE STORE (EXCEL / CSV ONLY)
+#
+# - Streamlit safe
+# - Cached CSV loading
+# - Excel upload handling
+# - No PDF logic
+# - No folder creation
+# =====================================================
 
 import os
 import pandas as pd
 import streamlit as st
 
-# -------------------------------------------------
-# PERMANENT STORAGE PATHS
-# -------------------------------------------------
-DATA_DIR = "data"
+# =====================================================
+# BASE PATHS
+# =====================================================
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
 CSV_PATH = os.path.join(DATA_DIR, "uploaded_file.csv")
 EXCEL_PATH = os.path.join(DATA_DIR, "uploaded_file.xlsx")
 
-# Ensure directory exists
 os.makedirs(DATA_DIR, exist_ok=True)
 
-
-# -------------------------------------------------
-# CACHE INVALIDATION HELPER
-# -------------------------------------------------
+# =====================================================
+# CACHE INVALIDATION
+# =====================================================
 @st.cache_data
 def _cache_buster(ts: float):
-    """
-    Dummy cached function.
-    Cache invalidates automatically when timestamp changes.
-    """
     return ts
 
 
-# -------------------------------------------------
-# SAVE EXCEL FILE (OVERWRITE ALWAYS)
-# -------------------------------------------------
+# =====================================================
+# SAVE EXCEL FILE (UPLOAD)
+# =====================================================
 def save_excel_file(uploaded_file):
     """
-    Saves uploaded Excel file safely.
-
-    Steps:
-    1. Read Excel
-    2. Save Excel (backup)
-    3. Save CSV (fast loading)
-    4. Invalidate cache automatically
-
-    Returns:
-        DataFrame or None
+    Save uploaded Excel file safely.
+    - Excel backup
+    - CSV for fast load
+    - Cache invalidation
     """
     try:
         if uploaded_file is None:
             return None
 
-        # Read Excel
         df = pd.read_excel(uploaded_file)
 
         if df.empty:
-            st.warning("⚠ Uploaded Excel is empty.")
+            st.warning("Uploaded Excel file is empty.")
             return None
 
-        # Save Excel (backup)
         df.to_excel(EXCEL_PATH, index=False)
-
-        # Save CSV (primary read source)
         df.to_csv(CSV_PATH, index=False)
 
-        # Bust cache
         ts = os.path.getmtime(CSV_PATH)
         _cache_buster.clear()
         _cache_buster(ts)
@@ -68,34 +62,21 @@ def save_excel_file(uploaded_file):
         return df
 
     except Exception as e:
-        st.error(f"❌ Error while saving Excel file: {e}")
+        st.error(f"Error while saving Excel file: {e}")
         return None
 
 
-# -------------------------------------------------
-# LOAD CSV WITH CACHE (FAST)
-# -------------------------------------------------
+# =====================================================
+# LOAD SAVED EXCEL DATA (CACHED)
+# =====================================================
 @st.cache_data
 def _load_csv_cached(ts: float):
-    """
-    Loads CSV using Streamlit cache.
-    Cache refreshes only when file timestamp changes.
-    """
-    df = pd.read_csv(CSV_PATH)
-    return df
+    return pd.read_csv(CSV_PATH)
 
 
-# -------------------------------------------------
-# PUBLIC LOADER (USE EVERYWHERE)
-# -------------------------------------------------
 def load_saved_excel():
     """
-    Universal loader used across all screens.
-
-    Logic:
-    - Load CSV if exists
-    - Respect cache timestamp
-    - Return DataFrame or None
+    Load last saved Excel data.
     """
     try:
         if not os.path.exists(CSV_PATH):
@@ -110,5 +91,5 @@ def load_saved_excel():
         return df
 
     except Exception as e:
-        st.error(f"❌ Error while loading saved data: {e}")
+        st.error(f"Error while loading saved data: {e}")
         return None

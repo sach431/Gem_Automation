@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 from services.file_store import load_saved_excel
 from services.date_filter import apply_date_filter
@@ -47,7 +48,7 @@ def detect_column(df, keywords):
 def app(search=None, start_date=None, end_date=None, mode=None):
 
     st.markdown("## 📄 Reports & Insights")
-    st.caption("Generate dynamic reports from uploaded Excel data")
+    st.caption("Dynamic reports & charts from any Excel file")
 
     # ---------------- LOAD DATA ----------------
     df = load_saved_excel()
@@ -63,7 +64,6 @@ def app(search=None, start_date=None, end_date=None, mode=None):
 
     # ---------------- APPLY DATE FILTER ----------------
     if date_col and start_date is not None and mode is not None:
-
         filtered, label, d1, d2 = apply_date_filter(
             df,
             date_col=date_col,
@@ -71,14 +71,12 @@ def app(search=None, start_date=None, end_date=None, mode=None):
             to_date=end_date,
             mode=mode
         )
-
         if label:
             st.caption(
                 f"📌 Period Applied: **{label}** "
                 f"({d1.strftime('%Y-%m-%d')} → {d2.strftime('%Y-%m-%d')})"
             )
     else:
-        # ✅ Date blank → FULL DATA
         filtered = df.copy()
 
     # ---------------- GLOBAL SEARCH ----------------
@@ -98,20 +96,23 @@ def app(search=None, start_date=None, end_date=None, mode=None):
     # ---------------- SMART COLUMN DETECTION ----------------
     category_col = detect_column(filtered, ["category", "brand", "type", "segment"])
     city_col     = detect_column(filtered, ["city", "state", "district", "location"])
-    seller_col   = detect_column(filtered, ["seller", "buyer", "name", "firm"])
+    seller_col   = detect_column(filtered, ["seller", "buyer", "organisation", "organization", "name", "firm"])
     value_col    = detect_column(filtered, ["value", "amount", "price", "total"])
 
     text_cols = filtered.select_dtypes(include="object").columns.tolist()
-    if not category_col:
+
+    if not category_col and text_cols:
         category_col = text_cols[0]
-    if not city_col:
+    if not city_col and text_cols:
         city_col = text_cols[0]
-    if not seller_col:
+    if not seller_col and text_cols:
         seller_col = text_cols[0]
 
     if not value_col:
         filtered["_auto_value"] = 1
         value_col = "_auto_value"
+
+    filtered[value_col] = pd.to_numeric(filtered[value_col], errors="coerce").fillna(0)
 
     # ---------------- REPORT CONTROLS ----------------
     st.subheader("📝 Report Configuration")
@@ -141,18 +142,12 @@ def app(search=None, start_date=None, end_date=None, mode=None):
     if st.button("🚀 Generate Report"):
 
         if report_type in ["Detailed", "Custom Columns"]:
-            report_df = (
-                filtered[selected_columns]
-                if selected_columns else filtered
-            )
+            report_df = filtered[selected_columns] if selected_columns else filtered
 
         elif report_type == "Summary":
             report_df = pd.DataFrame({
                 "Metric": ["Total Records", "Total Value"],
-                "Value": [
-                    len(filtered),
-                    filtered[value_col].sum()
-                ]
+                "Value": [len(filtered), filtered[value_col].sum()]
             })
 
         elif report_type == "Category-wise":
@@ -181,6 +176,36 @@ def app(search=None, start_date=None, end_date=None, mode=None):
 
         st.success("✅ Report generated successfully")
 
+        # ---------------- ADD S.No (FINAL STANDARD) ----------------
+        report_df = report_df.reset_index(drop=True)
+        report_df.insert(0, "S.No", range(1, len(report_df) + 1))
+
+        # ---------------- AUTO CHART ----------------
+        st.subheader("📊 Auto Chart")
+
+        if report_type in ["Category-wise", "City-wise", "Seller-wise"] and report_df.shape[1] >= 3:
+            x_col = report_df.columns[2]
+            y_col = report_df.columns[1]
+
+            fig = px.bar(
+                report_df.head(15),
+                x=y_col,
+                y=x_col,
+                orientation="h",
+                title=f"{report_type} Chart"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        elif report_type == "Summary":
+            fig = px.bar(
+                report_df,
+                x="Metric",
+                y="Value",
+                title="Summary Metrics"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------- DOWNLOAD ----------------
         st.download_button(
             "⬇️ Download Report",
             data=report_df.to_csv(index=False).encode("utf-8"),
@@ -189,9 +214,23 @@ def app(search=None, start_date=None, end_date=None, mode=None):
         )
 
         st.markdown("### 📑 Report Preview")
-        st.dataframe(report_df, use_container_width=True)
+        st.dataframe(
+            report_df,
+            hide_index=True,        # ❌ default index removed
+            use_container_width=True,
+            height=420
+        )
 
     # ---------------- RAW DATA PREVIEW ----------------
     st.divider()
     st.subheader("📊 Filtered Data Preview")
-    st.dataframe(filtered, use_container_width=True)
+
+    raw_df = filtered.reset_index(drop=True)
+    raw_df.insert(0, "S.No", range(1, len(raw_df) + 1))
+
+    st.dataframe(
+        raw_df,
+        hide_index=True,           # ❌ default index removed
+        use_container_width=True,
+        height=420
+    )

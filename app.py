@@ -1,3 +1,13 @@
+# app.py
+# =========================================================
+# HEALTH DASHBOARD – MAIN STREAMLIT ENTRY
+#
+# ✔ Central routing
+# ✔ Global search & date filters
+# ✔ Quarter / Custom date handling
+# ✔ Stable session-state management
+# =========================================================
+
 import streamlit as st
 
 from screens.Dashboard import app as dashboard_page
@@ -8,9 +18,9 @@ from screens.Master_Category import app as master_page
 from services.date_filter import get_quarter_range
 
 
-# ---------------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------------
+# =========================================================
+# PAGE CONFIG (RUN ONCE)
+# =========================================================
 st.set_page_config(
     page_title="Health Dashboard",
     layout="wide",
@@ -18,9 +28,21 @@ st.set_page_config(
 )
 
 
-# ---------------------------------------------------------
-# CALLBACKS (ONLY PLACE WHERE STATE CHANGES)
-# ---------------------------------------------------------
+# =========================================================
+# SESSION STATE INITIALIZATION
+# =========================================================
+def init_session_state():
+    st.session_state.setdefault("from_date", None)
+    st.session_state.setdefault("to_date", None)
+    st.session_state.setdefault("mode", None)
+
+
+init_session_state()
+
+
+# =========================================================
+# DATE CALLBACKS (ONLY PLACE STATE IS MUTATED)
+# =========================================================
 def on_from_date_change():
     from_date = st.session_state.from_date
 
@@ -38,26 +60,20 @@ def on_to_date_change():
         st.session_state.mode = "custom"
 
 
-# ---------------------------------------------------------
-# TOP BAR
-# ---------------------------------------------------------
-def top_bar():
-
-    # -------- INIT STATE (BEFORE WIDGETS) --------
-    st.session_state.setdefault("from_date", None)
-    st.session_state.setdefault("to_date", None)
-    st.session_state.setdefault("mode", None)
-
+# =========================================================
+# TOP FILTER BAR
+# =========================================================
+def render_top_bar():
     col1, col2, col3 = st.columns([3, 1.5, 1.5])
 
-    # -------- SEARCH --------
+    # ---------------- SEARCH ----------------
     with col1:
         search = st.text_input(
             "🔍 Search",
             placeholder="Search buyer, seller, item..."
         )
 
-    # -------- FROM DATE --------
+    # ---------------- FROM DATE ----------------
     with col2:
         st.date_input(
             "📅 From",
@@ -66,7 +82,7 @@ def top_bar():
             on_change=on_from_date_change
         )
 
-    # -------- TO DATE --------
+    # ---------------- TO DATE ----------------
     with col3:
         st.date_input(
             "📅 To",
@@ -75,11 +91,12 @@ def top_bar():
             on_change=on_to_date_change
         )
 
-    # -------- LABEL --------
+    # ---------------- DATE LABEL ----------------
     if st.session_state.from_date and st.session_state.to_date:
         if st.session_state.mode == "quarter":
             _, _, q_label = get_quarter_range(st.session_state.from_date)
             st.caption(f"📦 Auto Quarter Applied: **{q_label}**")
+
         elif st.session_state.mode == "custom":
             st.caption(
                 f"🧾 Custom Period: "
@@ -95,26 +112,31 @@ def top_bar():
     )
 
 
-# ---------------------------------------------------------
-# SIDEBAR
-# ---------------------------------------------------------
+# =========================================================
+# SIDEBAR NAVIGATION
+# =========================================================
 st.sidebar.title("📌 Health Dashboard")
 
 menu = st.sidebar.radio(
     "Go to",
-    ["📊 Dashboard", "🔍 Category Search", "📄 Reports", "📂 Master Category"]
+    (
+        "📊 Dashboard",
+        "🔍 Category Search",
+        "📄 Reports",
+        "📂 Master Category",
+    )
 )
 
 
-# ---------------------------------------------------------
-# GLOBAL FILTERS
-# ---------------------------------------------------------
-search, start_date, end_date, mode = top_bar()
+# =========================================================
+# GLOBAL FILTERS (USED BY ALL SCREENS)
+# =========================================================
+search, start_date, end_date, mode = render_top_bar()
 
 
-# ---------------------------------------------------------
-# ROUTING
-# ---------------------------------------------------------
+# =========================================================
+# PAGE ROUTING
+# =========================================================
 if menu == "📊 Dashboard":
     dashboard_page(search, start_date, end_date, mode)
 
